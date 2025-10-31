@@ -502,8 +502,8 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 # --- NAYA (FIXED) Bot ko Start karne ka Function ---
 
-async def get_bot_username(application: Application) -> None:
-    """(Naya function) Bot username fetch karega."""
+async def post_init(application: Application) -> None:
+    """(Naya function) Bot username fetch karega (Event Loop error fix)."""
     global BOT_USERNAME
     try:
         bot_info = await application.bot.get_me()
@@ -514,7 +514,7 @@ async def get_bot_username(application: Application) -> None:
     except Exception as e:
         logger.critical(f"Bot ka username fetch nahi kar paya! Error: {e}")
         logger.critical("CHECK KI BOT TOKEN SAHI HAI YA NAHI.")
-        exit(1)
+        exit(1) # Bot ko band kar do agar username nahi mila
 
 def main() -> None:
     """(Yeh naya 'main' function hai) Bot ko start karta hai."""
@@ -527,13 +527,14 @@ def main() -> None:
     
     # 2. Telegram Bot Application banao
     logger.info("Telegram Bot ko start kar raha hoon...")
-    application = Application.builder().token(BOT_TOKEN).build()
+    application = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .post_init(post_init) # <-- YEH HAI ASLI EVENT LOOP FIX
+        .build()
+    )
 
-    # 3. Bot ka username fetch karo (Async call, lekin synchronously run kiya)
-    # Yeh ek naya event loop banayega, username fetch karega, aur band ho jayega.
-    asyncio.run(get_bot_username(application))
-
-    # 4. Conversation Handler (Add Content ke liye)
+    # 3. Conversation Handler (Add Content ke liye)
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_content, pattern="^admin_add_content$")],
         states={
@@ -549,8 +550,8 @@ def main() -> None:
             ],
             # --- YEH HAI ASLI FILTER FIX ---
             GENERATE_POST: [
-                MessageHandler(filters.VIDEO, receive_file_and_ask_more_quality),
-                MessageHandler(filters.Document, receive_file_and_ask_more_quality)
+                MessageHandler(filters.VIDEO, receive_file_and_ask_more_quality), # filters.VIDEO (CAPS)
+                MessageHandler(filters.Document, receive_file_and_ask_more_quality) # filters.Document (D capital)
             ],
             # ---------------------------------
             CHECK_ANOTHER_EP: [CallbackQueryHandler(check_another_ep_handler, pattern="^(add_next_ep|add_new_season|generate_season_post|cancel_conv)$")]
@@ -566,7 +567,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CallbackQueryHandler(button_handler))
 
-    # 5. Bot ko chalao (Yeh blocking hai aur apna event loop chalata hai)
+    # 4. Bot ko chalao (Yeh blocking hai aur apna event loop chalata hai)
     logger.info("Bot ne polling shuru kar di...")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
