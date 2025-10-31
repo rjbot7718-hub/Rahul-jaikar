@@ -550,7 +550,7 @@ def main() -> None:
             # --- YEH HAI ASLI FILTER FIX ---
             GENERATE_POST: [
                 MessageHandler(filters.VIDEO, receive_file_and_ask_more_quality),
-                MessageHandler(filters.DOCUMENT, receive_file_and_ask_more_quality)
+                MessageHandler(filters.Document, receive_file_and_ask_more_quality)
             ],
             # ---------------------------------
             CHECK_ANOTHER_EP: [CallbackQueryHandler(check_another_ep_handler, pattern="^(add_next_ep|add_new_season|generate_season_post|cancel_conv)$")]
