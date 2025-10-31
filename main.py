@@ -500,15 +500,11 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             )
 
 
-# --- Bot ko Start karne ka Function ---
-async def main_bot_logic() -> None:
-    """Bot ko start karta hai."""
+# --- NAYA (FIXED) Bot ko Start karne ka Function ---
+
+async def get_bot_username(application: Application) -> None:
+    """(Naya function) Bot username fetch karega."""
     global BOT_USERNAME
-    
-    logger.info("Telegram Bot ko start kar raha hoon...")
-    application = Application.builder().token(BOT_TOKEN).build()
-    
-    # --- FIX 1 (coroutine) ---
     try:
         bot_info = await application.bot.get_me()
         BOT_USERNAME = bot_info.username
@@ -519,14 +515,31 @@ async def main_bot_logic() -> None:
         logger.critical(f"Bot ka username fetch nahi kar paya! Error: {e}")
         logger.critical("CHECK KI BOT TOKEN SAHI HAI YA NAHI.")
         exit(1)
-        
-    # --- Conversation Handler (Add Content ke liye) ---
+
+def main() -> None:
+    """(Yeh naya 'main' function hai) Bot ko start karta hai."""
+    
+    # 1. Flask server ko background thread mein chalao
+    logger.info("Flask server ko background mein start kar raha hoon...")
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True # Taaki main program band ho toh yeh bhi ho jaaye
+    flask_thread.start()
+    
+    # 2. Telegram Bot Application banao
+    logger.info("Telegram Bot ko start kar raha hoon...")
+    application = Application.builder().token(BOT_TOKEN).build()
+
+    # 3. Bot ka username fetch karo (Async call, lekin synchronously run kiya)
+    # Yeh ek naya event loop banayega, username fetch karega, aur band ho jayega.
+    asyncio.run(get_bot_username(application))
+
+    # 4. Conversation Handler (Add Content ke liye)
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_content, pattern="^admin_add_content$")],
         states={
             ASK_CONTENT_TYPE: [CallbackQueryHandler(ask_title, pattern="^(add_anime|add_movie)$")],
             ASK_THUMBNAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_thumbnail)],
-            ASK_DESCRIPTION: [MessageHandler(filters.PHOTO, ask_description)], # filters.PHOTO is correct
+            ASK_DESCRIPTION: [MessageHandler(filters.PHOTO, ask_description)], # filters.PHOTO SAHI HAI
             ASK_SEASON_NUM: [MessageHandler(filters.TEXT | filters.COMMAND, ask_season_num)], # /skip handle karega
             ASK_EPISODE_NUM: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_episode_num)],
             ASK_QUALITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_quality)],
@@ -534,13 +547,12 @@ async def main_bot_logic() -> None:
                 CallbackQueryHandler(ask_file, pattern="^qual_(480p|720p|1080p|4k)$"),
                 CallbackQueryHandler(save_to_db_and_generate_post, pattern="^qual_done$")
             ],
-            # --- FIX 2 (AttributeError) ---
-            # filters.Video.ALL -> filters.VIDEO
-            # filters.Document.ALL -> filters.DOCUMENT
+            # --- YEH HAI ASLI FILTER FIX ---
             GENERATE_POST: [
-    MessageHandler(filters.VIDEO, receive_file_and_ask_more_quality),
-    MessageHandler(filters.Document, receive_file_and_ask_more_quality)
-],
+                MessageHandler(filters.VIDEO, receive_file_and_ask_more_quality),
+                MessageHandler(filters.DOCUMENT, receive_file_and_ask_more_quality)
+            ],
+            # ---------------------------------
             CHECK_ANOTHER_EP: [CallbackQueryHandler(check_another_ep_handler, pattern="^(add_next_ep|add_new_season|generate_season_post|cancel_conv)$")]
         },
         fallbacks=[
@@ -554,25 +566,10 @@ async def main_bot_logic() -> None:
     application.add_handler(CommandHandler("start", start_command))
     application.add_handler(CallbackQueryHandler(button_handler))
 
-    # Bot ko chalao
+    # 5. Bot ko chalao (Yeh blocking hai aur apna event loop chalata hai)
     logger.info("Bot ne polling shuru kar di...")
-    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-# --- FIX 3 (Threading) ---
-def main():
-    # Flask server ko background thread mein chalao
-    logger.info("Flask server ko background mein start kar raha hoon...")
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True # Taaki main program band ho toh yeh bhi ho jaaye
-    flask_thread.start()
-    
-    # Telegram bot ko main thread mein (asyncio loop ke saath) chalao
-    try:
-        asyncio.run(main_bot_logic())
-    except KeyboardInterrupt:
-        logger.info("Bot ko band kar raha hoon...")
-    except Exception as e:
-        logger.critical(f"Bot crash ho gaya: {e}", exc_info=True)
 
 if __name__ == "__main__":
     main()
