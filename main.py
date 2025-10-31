@@ -1,7 +1,8 @@
 import os
 import logging
 import threading
-import re # <-- NEW: Text check karne ke liye
+import re # Text check karne ke liye
+import asyncio # Error fix ke liye
 from flask import Flask
 from pymongo import MongoClient
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, PhotoSize, Document, Video
@@ -10,16 +11,16 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
-    ConversationHandler, # <-- NEW: Multi-step process ke liye
-    MessageHandler,        # <-- NEW: Text/Photo/Video messages ke liye
-    filters,               # <-- NEW: Message type check karne ke liye
+    ConversationHandler, # Multi-step process ke liye
+    MessageHandler,        # Text/Photo/Video messages ke liye
+    filters,               # Message type check karne ke liye
 )
 
 # --- Logging (Errors dekhne ke liye) ---
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-logger = logging.getLogger(__name__)
+logger = logging.getLogger(_name_)
 
 # --- Environment Variables (Yeh Render mein daalna) ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -40,7 +41,7 @@ if ADMIN_ID == 0:
     exit(1)
 
 # --- Flask App (Uptime Robot ke liye) ---
-app = Flask(__name__)
+app = Flask(_name_)
 @app.route('/')
 def hello():
     return "Bot is alive and running!"
@@ -373,7 +374,14 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
         text="Ab kya karna hai?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    
+    context.user_data['content'].pop('episode_num', None)
+    context.user_data['content'].pop('qualities', None)
+    context.user_data['content'].pop('current_quality', None)
+
+    return CHECK_ANOTHER_EP
+
+async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Step 11: User ke 'Add Next Ep' ya 'Finish' click ko handle karega."""
     query = update.callback_query
     await query.answer()
@@ -466,7 +474,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif data == "admin_pending_payments":
         await query.edit_message_text(text="Admin: Aap 'Pending Payments' section mein hain. (WIP - Step 4 mein banega)")
 
-    # ---- USER BUTTONS (WIP) ----
+   # ---- USER BUTTONS (WIP) ----
     elif data == "user_expiry":
         await query.answer("Checking... (WIP)", show_alert=False)
         await query.edit_message_text(text="Aapki subscription details yahan dikhengi. (WIP - Step 6)")
@@ -546,13 +554,11 @@ async def main_bot_logic() -> None: # <-- *FIX YAHAN HAI* (Naam change kiya)
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 # --- NEW: Main function jo dono threads ko start karega ---
-import asyncio
-
 def main():
     # Flask server ko background thread mein chalao
     logger.info("Flask server ko background mein start kar raha hoon...")
     flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
+    flask_thread.daemon = True # Taaki main program band ho toh yeh bhi ho jaaye
     flask_thread.start()
     
     # Telegram bot ko main thread mein (asyncio loop ke saath) chalao
@@ -564,5 +570,4 @@ def main():
         logger.critical(f"Bot crash ho gaya: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    main()  
-    context.user_data['content'].pop('episode_num', None
+    main()
