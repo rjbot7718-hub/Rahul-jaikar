@@ -537,7 +537,10 @@ async def main_bot_logic() -> None:
             # --- FIX 2 (AttributeError) ---
             # filters.Video.ALL -> filters.VIDEO
             # filters.Document.ALL -> filters.DOCUMENT
-            GENERATE_POST: [MessageHandler(filters.VIDEO | filters.Document, receive_file_and_ask_more_quality)],
+            GENERATE_POST: [
+    MessageHandler(filters.VIDEO, receive_file_and_ask_more_quality),
+    MessageHandler(filters.Document, receive_file_and_ask_more_quality)
+],
             CHECK_ANOTHER_EP: [CallbackQueryHandler(check_another_ep_handler, pattern="^(add_next_ep|add_new_season|generate_season_post|cancel_conv)$")]
         },
         fallbacks=[
