@@ -380,7 +380,6 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
     context.user_data['content'].pop('current_quality', None)
 
     return CHECK_ANOTHER_EP
-
 async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Step 11: User ke 'Add Next Ep' ya 'Finish' click ko handle karega."""
     query = update.callback_query
@@ -474,7 +473,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     elif data == "admin_pending_payments":
         await query.edit_message_text(text="Admin: Aap 'Pending Payments' section mein hain. (WIP - Step 4 mein banega)")
 
-   # ---- USER BUTTONS (WIP) ----
+    # ---- USER BUTTONS (WIP) ----
     elif data == "user_expiry":
         await query.answer("Checking... (WIP)", show_alert=False)
         await query.edit_message_text(text="Aapki subscription details yahan dikhengi. (WIP - Step 6)")
@@ -502,14 +501,14 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # --- Bot ko Start karne ka Function ---
-async def main_bot_logic() -> None: # <-- *FIX YAHAN HAI* (Naam change kiya)
+async def main_bot_logic() -> None:
     """Bot ko start karta hai."""
     global BOT_USERNAME
     
     logger.info("Telegram Bot ko start kar raha hoon...")
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # <-- *FIX YAHAN HAI* (await lagaya)
+    # <-- *FIX 1 (coroutine):* 'await' lagaya
     try:
         bot_info = await application.bot.get_me()
         BOT_USERNAME = bot_info.username
@@ -535,7 +534,8 @@ async def main_bot_logic() -> None: # <-- *FIX YAHAN HAI* (Naam change kiya)
                 CallbackQueryHandler(ask_file, pattern="^qual_(480p|720p|1080p|4k)$"),
                 CallbackQueryHandler(save_to_db_and_generate_post, pattern="^qual_done$")
             ],
-            GENERATE_POST: [MessageHandler(filters.VIDEO | filters.DOCUMENT, receive_file_and_ask_more_quality)],
+            # <-- *FIX 2 (AttributeError):* filters.VIDEO -> filters.Video.ALL
+            GENERATE_POST: [MessageHandler(filters.Video.ALL | filters.Document.ALL, receive_file_and_ask_more_quality)],
             CHECK_ANOTHER_EP: [CallbackQueryHandler(check_another_ep_handler, pattern="^(add_next_ep|add_new_season|generate_season_post|cancel_conv)$")]
         },
         fallbacks=[
@@ -553,7 +553,7 @@ async def main_bot_logic() -> None: # <-- *FIX YAHAN HAI* (Naam change kiya)
     logger.info("Bot ne polling shuru kar di...")
     await application.run_polling(allowed_updates=Update.ALL_TYPES)
 
-# --- NEW: Main function jo dono threads ko start karega ---
+# --- *FIX 3 (Threading):* Main function jo dono threads ko start karega ---
 def main():
     # Flask server ko background thread mein chalao
     logger.info("Flask server ko background mein start kar raha hoon...")
