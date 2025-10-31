@@ -373,7 +373,7 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
         text="Ab kya karna hai?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-  async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Step 11: User ke 'Add Next Ep' ya 'Finish' click ko handle karega."""
     query = update.callback_query
     await query.answer()
