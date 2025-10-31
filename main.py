@@ -20,7 +20,7 @@ from telegram.ext import (
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
-logger = logging.getLogger(_name_)
+logger = logging.getLogger(__name__)
 
 # --- Environment Variables (Yeh Render mein daalna) ---
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -41,7 +41,7 @@ if ADMIN_ID == 0:
     exit(1)
 
 # --- Flask App (Uptime Robot ke liye) ---
-app = Flask(_name_)
+app = Flask(__name__)
 @app.route('/')
 def hello():
     return "Bot is alive and running!"
