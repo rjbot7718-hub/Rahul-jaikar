@@ -26,7 +26,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 MONGO_URI = os.environ.get("MONGO_URI")
 ADMIN_ID = int(os.environ.get("ADMIN_ID", "0"))
 PORT = int(os.environ.get("PORT", 8080))
-# <-- NEW: Isse hum bot ka username store karenge
 BOT_USERNAME = "" # Yeh bot khud fetch kar lega
 
 # --- Error Checks ---
@@ -54,7 +53,6 @@ def run_flask():
 try:
     client = MongoClient(MONGO_URI)
     db = client.get_database() # URI se default DB lega
-    # <-- NEW: Saare collections define kar diye
     users_collection = db['users']
     config_collection = db['config']
     content_collection = db['content'] # Naya content collection
@@ -71,14 +69,12 @@ except Exception as e:
     exit(1)
 
 # --- Conversation States (Add Content flow ke steps) ---
-# Yeh bot ko batata hai ki conversation kaunse step par hai
 (ASK_CONTENT_TYPE, ASK_TITLE, ASK_THUMBNAIL, ASK_DESCRIPTION, 
  ASK_SEASON_NUM, ASK_EPISODE_NUM, ASK_QUALITY, ASK_FILE, 
- GENERATE_POST, CHECK_ANOTHER_EP) = range(10) # <-- NEW: 10 steps
+ GENERATE_POST, CHECK_ANOTHER_EP) = range(10)
 
 # --- Keyboards (Buttons) ---
 def get_admin_keyboard() -> InlineKeyboardMarkup:
-    # (Pending count ko future mein update karenge)
     keyboard = [
         [InlineKeyboardButton("➕ Add Content", callback_data="admin_add_content")],
         [InlineKeyboardButton("✏ Manage Content", callback_data="admin_manage_content")],
@@ -100,12 +96,10 @@ def get_user_keyboard() -> InlineKeyboardMarkup:
 
 # --- Helper Function (Sharable Post banane ke liye) ---
 def get_sharable_post_markup(content_id: str) -> InlineKeyboardMarkup:
-    # <-- NEW: Yeh function group post ke 4 button banayega
-    # Jab user 'Download' click karega, toh bot ko "start=content_id" ka signal milega
     keyboard = [
         [
             InlineKeyboardButton("📥 Download", url=f"https"f"://t.me/{BOT_USERNAME}?start={content_id}"),
-            InlineKeyboardButton("🔗 Join Backup", callback_data=f"user_backup") # Removed content_id, as it's general
+            InlineKeyboardButton("🔗 Join Backup", callback_data=f"user_backup")
         ],
         [
             InlineKeyboardButton("💸 Donate", callback_data=f"user_donate"),
@@ -121,13 +115,10 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user = update.effective_user
     user_id = user.id
     
-    # <-- NEW: 'start' ke saath agar content_id aaya hai (e.g., /start naruto_s1)
-    # Yeh 'Download' button se aane wale users ko handle karega
     if context.args:
         content_id = context.args[0]
         logger.info(f"User {user_id} ne content {content_id} ke liye start kiya.")
         
-        # User ko DB mein add karo agar nahi hai
         user_data = users_collection.find_one({"user_id": user_id})
         if not user_data:
             users_collection.insert_one({
@@ -136,17 +127,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             })
             logger.info(f"Naya user add hua (deep link se): {user.username} ({user_id})")
         
-        # (Step 4/5 mein hum yahan subscription check logic likhenge)
         await update.message.reply_text(f"Welcome, {user.first_name}!\n\nAap '{content_id}' download karna chahte hain.\n(Abhi ke liye WIP. Yeh Step 4/5 mein banega)")
         
-        # Store karo ki user kya download karna chahta hai
         context.user_data['wants_to_download'] = content_id
-        
-        # TODO: Yahan se seedha download ya payment flow shuru karna hai
         
         return
 
-    # Normal /start (bina content_id ke)
     if user_id == ADMIN_ID:
         await update.message.reply_text(
             f"Salaam, Admin Boss! 🫡\nAapka control panel taiyyar hai.",
@@ -166,14 +152,12 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             reply_markup=get_user_keyboard()
         )
 
-# --- NEW: "Add Content" Conversation Flow ---
+# --- "Add Content" Conversation Flow ---
 
 async def admin_add_content(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 1: 'Add Content' button click karne par. Type poochega."""
     query = update.callback_query
     await query.answer()
     
-    # user_data mein info store karna shuru karenge
     context.user_data['content'] = {}
     
     keyboard = [
@@ -190,32 +174,26 @@ async def admin_add_content(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ASK_CONTENT_TYPE
 
 async def ask_title(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 2: Type select karne par. Title poochega."""
     query = update.callback_query
     await query.answer()
     
-    content_type = query.data.split('_')[1] # 'add_anime' se 'anime' nikalega
+    content_type = query.data.split('_')[1]
     context.user_data['content']['type'] = content_type
     
     await query.edit_message_text(f"Nayi {content_type} ka *Title* bhejo:")
     return ASK_THUMBNAIL
 
 async def ask_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 3: Title milne par. Thumbnail poochega."""
     title = update.message.text
-    # content_id title se banayenge (e.g., "Naruto Shippuden" -> "naruto_shippuden")
-    # Replace anything that's not a letter, number, or underscore
     content_id = re.sub(r'[^a-z0-9_]', '', title.lower().replace(' ', '_'))
     
-    # Check karo ki yeh title/ID pehle se toh nahi hai
     existing_content = content_collection.find_one({"content_id": content_id})
     if existing_content:
-        # Title pehle se hai, thumbnail aur description skip kar denge
         context.user_data['content']['title'] = existing_content['title']
         context.user_data['content']['content_id'] = existing_content['content_id']
         context.user_data['content']['thumbnail_file_id'] = existing_content['thumbnail_file_id']
         context.user_data['content']['description'] = existing_content.get('description', '')
-        context.user_data['content']['type'] = existing_content['type'] # Type bhi purana use karo
+        context.user_data['content']['type'] = existing_content['type']
         
         await update.message.reply_text(f"{title}** pehle se database mein hai.\nNaya season/episode add kar rahe hain...")
         
@@ -224,18 +202,15 @@ async def ask_thumbnail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
              return ASK_EPISODE_NUM
         else:
             await update.message.reply_text("Ab *Season Number* bhejo (e.g., 2):")
-            return ASK_EPISODE_NUM # Seedha Episode pe jao
+            return ASK_EPISODE_NUM
             
     else:
-        # Naya title hai, poora flow chalao
         context.user_data['content']['title'] = title
         context.user_data['content']['content_id'] = content_id
         await update.message.reply_text("Ab iska *Poster/Thumbnail* bhejo:")
         return ASK_DESCRIPTION
 
 async def ask_description(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 4: Thumbnail milne par. Description poochega."""
-    # Sabse best quality ki photo ka file_id nikalenge
     thumbnail_file_id = update.message.photo[-1].file_id
     context.user_data['content']['thumbnail_file_id'] = thumbnail_file_id
     
@@ -243,26 +218,21 @@ async def ask_description(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ASK_SEASON_NUM
 
 async def ask_season_num(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 5: Description milne par. Season number poochega."""
     if update.message.text and update.message.text != '/skip':
         context.user_data['content']['description'] = update.message.text
     else:
-        context.user_data['content']['description'] = "" # Khali description
+        context.user_data['content']['description'] = ""
     
-    # Agar Movie hai, toh season nahi poochenge
     if context.user_data['content']['type'] == 'Movie':
-        context.user_data['content']['season_num'] = "1" # Default "1" rakho movie ke liye
+        context.user_data['content']['season_num'] = "1"
         await update.message.reply_text("Movie ka episode number bhejo (e.g., 1 agar ek hi part hai):")
-        return ASK_EPISODE_NUM # Seedha Episode pe jao
+        return ASK_EPISODE_NUM
         
     await update.message.reply_text("Ab *Season Number* bhejo (e.g., 1):")
-    return ASK_EPISODE_NUM # Yeh actual mein ASK_EPISODE_NUM state pe jaana chahiye
+    return ASK_EPISODE_NUM
 
 async def ask_episode_num(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 6: Season number milne par. Episode number poochega."""
-    # Agar Anime hai toh Season num save karo
     if context.user_data['content']['type'] == 'Anime':
-        # Yeh check karo ki season num pehle step se aaya ya abhi
         if 'season_num' not in context.user_data['content']:
              context.user_data['content']['season_num'] = update.message.text
         
@@ -270,9 +240,7 @@ async def ask_episode_num(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ASK_QUALITY
 
 async def ask_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 7: Episode number milne par. Quality poochega."""
     context.user_data['content']['episode_num'] = update.message.text
-    # Nayi quality add karne se pehle, purani clear karo
     context.user_data['content']['qualities'] = {}
     
     keyboard = [
@@ -291,18 +259,16 @@ async def ask_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return ASK_FILE
 
 async def ask_file(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 8: Quality select karne par. File forward karne ko bolega."""
     query = update.callback_query
     await query.answer()
     
-    quality = query.data.split('_')[1] # 'qual_480p' se '480p'
-    context.user_data['content']['current_quality'] = quality # Store karo kaunsi quality maangi hai
+    quality = query.data.split('_')[1]
+    context.user_data['content']['current_quality'] = quality
     
     await query.edit_message_text(f"Ab {quality} wali *Video File* forward karo.")
-    return GENERATE_POST # Agla step file receive karna hai
+    return GENERATE_POST
 
 async def receive_file_and_ask_more_quality(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 9: File milne par. Save karega aur poochega 'aur quality?'"""
     
     file_id = None
     if update.message.video:
@@ -312,15 +278,13 @@ async def receive_file_and_ask_more_quality(update: Update, context: ContextType
     
     if not file_id:
         await update.message.reply_text("Yeh file type support nahi karta. Please video ya file forward karo.")
-        return GENERATE_POST # Wapas isi state mein raho file ka wait karte hue
+        return GENERATE_POST
 
-    # Jo quality maangi thi (e.g., '480p'), uske against file_id save karo
     quality = context.user_data['content']['current_quality']
     context.user_data['content']['qualities'][quality] = file_id
     
     await update.message.reply_text(f"✅ {quality} file saved!")
 
-    # Wapas quality selection menu dikhao
     keyboard = [
         [
             InlineKeyboardButton("480p", callback_data="qual_480p"),
@@ -337,29 +301,22 @@ async def receive_file_and_ask_more_quality(update: Update, context: ContextType
         "Isi episode ki aur quality add karni hai? Ya 'DONE' pe click karke aage badho.", 
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    return ASK_FILE # Wapas quality selection state pe jao
+    return ASK_FILE
 
 
 async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Step 10: Jab user 'DONE' (qual_done) click karega. DB mein save karega."""
     query = update.callback_query
     await query.answer()
 
     data = context.user_data['content']
     
-    # --- Data ko MongoDB mein save karne ka logic ---
     content_id = data['content_id']
     
-    # Keys ko safe banayenge (dot '.' allowed nahi hai keys mein)
     season_key = f"s_{data['season_num']}"
     episode_key = f"ep_{data['episode_num']}"
     
-    # Nested path for update
-    # e.g., seasons.s_1.episodes.ep_1
     update_path_prefix = f"seasons.{season_key}.episodes.{episode_key}"
 
-    # upsert=True naya content bana dega agar nahi hai
-    # $set se data add/update karega
     content_collection.update_one(
         {"content_id": content_id},
         {
@@ -368,11 +325,11 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
                 "type": data['type'],
                 "thumbnail_file_id": data['thumbnail_file_id'],
                 "description": data.get('description', ''),
-                f"seasons.{season_key}.season_title": f"Season {data['season_num']}", # Helper
-                f"{update_path_prefix}.episode_title": f"Episode {data['episode_num']}", # Helper
-                f"{update_path_prefix}.qualities": data['qualities'] # Poora quality object
+                f"seasons.{season_key}.season_title": f"Season {data['season_num']}",
+                f"{update_path_prefix}.episode_title": f"Episode {data['episode_num']}",
+                f"{update_path_prefix}.qualities": data['qualities']
             },
-            "$setOnInsert": { "content_id": content_id } # Sirf pehli baar set hoga
+            "$setOnInsert": { "content_id": content_id }
         },
         upsert=True
     )
@@ -380,7 +337,6 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
     logger.info(f"Admin ne naya content add kiya: {content_id} S{data['season_num']} E{data['episode_num']}")
     await query.edit_message_text("✅ Episode data saved successfully!")
 
-    # --- Sharable Post Generate Karo ---
     caption = f"{data['title']}\n\n"
     if data['description']:
         caption += f"{data['description']}\n\n"
@@ -390,7 +346,6 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
     else:
         caption += f"✨ MOVIE/PART {data['episode_num']} ADDED ✨"
 
-    # Bot se post ka thumbnail+caption+button maango
     await context.bot.send_photo(
         chat_id=update.effective_chat.id,
         photo=data['thumbnail_file_id'],
@@ -403,7 +358,6 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
         text="Yeh raha aapka sharable post. Isse seedha group mein forward kar do."
     )
 
-    # --- NEW: Poocho ki aur episode add karna hai? ---
     keyboard = [
         [
             InlineKeyboardButton("✅ Haan (Isi Season ka Agla Episode)", callback_data="add_next_ep"),
@@ -419,15 +373,7 @@ async def save_to_db_and_generate_post(update: Update, context: ContextTypes.DEF
         text="Ab kya karna hai?",
         reply_markup=InlineKeyboardMarkup(keyboard)
     )
-    
-    # qualities aur episode num clear karo, lekin season/title rehne do
-    context.user_data['content'].pop('episode_num', None)
-    context.user_data['content'].pop('qualities', None)
-    context.user_data['content'].pop('current_quality', None)
-
-    return CHECK_ANOTHER_EP # Agle step ka wait karo
-
-async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+  async def check_another_ep_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Step 11: User ke 'Add Next Ep' ya 'Finish' click ko handle karega."""
     query = update.callback_query
     await query.answer()
@@ -535,7 +481,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     
     # Agar button ka command samajh na aaye, menu reset kar do
     else:
-        # Check karo ki user admin hai ya normal
         if user_id == ADMIN_ID:
              await query.edit_message_text(
                 text=f"Salaam, Admin Boss! 🫡\nAapka control panel taiyyar hai.",
@@ -549,20 +494,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # --- Bot ko Start karne ka Function ---
-def main() -> None:
+async def main_bot_logic() -> None: # <-- *FIX YAHAN HAI* (Naam change kiya)
     """Bot ko start karta hai."""
-    global BOT_USERNAME # Global variable ko update karenge
-    
-    logger.info("Flask server ko background mein start kar raha hoon...")
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.start()
+    global BOT_USERNAME
     
     logger.info("Telegram Bot ko start kar raha hoon...")
     application = Application.builder().token(BOT_TOKEN).build()
     
-    # <-- NEW: Bot ka username fetch karo (Download link ke liye zaroori)
+    # <-- *FIX YAHAN HAI* (await lagaya)
     try:
-        BOT_USERNAME = application.bot.get_me().username
+        bot_info = await application.bot.get_me()
+        BOT_USERNAME = bot_info.username
         if not BOT_USERNAME:
             raise Exception("Username was empty")
         logger.info(f"Bot ka username hai: @{BOT_USERNAME}")
@@ -571,7 +513,7 @@ def main() -> None:
         logger.critical("CHECK KI BOT TOKEN SAHI HAI YA NAHI.")
         exit(1)
         
-    # --- NEW: Conversation Handler (Add Content ke liye) ---
+    # --- Conversation Handler (Add Content ke liye) ---
     conv_handler = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_add_content, pattern="^admin_add_content$")],
         states={
@@ -592,16 +534,35 @@ def main() -> None:
             CallbackQueryHandler(cancel_conv, pattern="^cancel_conv$"),
             CommandHandler("cancel", cancel_conv)
         ],
-        per_message=False # Ek hi user se saari conversation
+        per_message=False
     )
     
-    application.add_handler(conv_handler) # <-- NEW
-    
-    # Baaki normal handlers
+    application.add_handler(conv_handler)
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CallbackQueryHandler(button_handler)) # Baaki buttons ke liye
+    application.add_handler(CallbackQueryHandler(button_handler))
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Bot ko chalao
+    logger.info("Bot ne polling shuru kar di...")
+    await application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+# --- NEW: Main function jo dono threads ko start karega ---
+import asyncio
+
+def main():
+    # Flask server ko background thread mein chalao
+    logger.info("Flask server ko background mein start kar raha hoon...")
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # Telegram bot ko main thread mein (asyncio loop ke saath) chalao
+    try:
+        asyncio.run(main_bot_logic())
+    except KeyboardInterrupt:
+        logger.info("Bot ko band kar raha hoon...")
+    except Exception as e:
+        logger.critical(f"Bot crash ho gaya: {e}", exc_info=True)
 
 if __name__ == "__main__":
-    main()
+    main()  
+    context.user_data['content'].pop('episode_num', None
