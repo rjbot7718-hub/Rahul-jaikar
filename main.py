@@ -26,7 +26,7 @@ try:
     MONGO_URI = os.getenv("MONGO_URI")
     ADMIN_ID = int(os.getenv("ADMIN_ID"))
     if not BOT_TOKEN or not MONGO_URI or not ADMIN_ID:
-        logger.error("Error: Secrets missing. Check .env file.")
+        logger.error("Error: Secrets missing. Check .env file or Render env variables.")
         exit()
 except Exception as e:
     logger.error(f"Error reading secrets: {e}")
@@ -38,9 +38,8 @@ try:
     client = MongoClient(MONGO_URI)
     db = client['AnimeBotDB']
     users_collection = db['users']
-    animes_collection = db['animes'] # Naya collection Animes ke liye
-    config_collection = db['config'] # Config ke liye (aage use hoga)
-    
+    animes_collection = db['animes'] 
+    config_collection = db['config'] 
     client.server_info()
     logger.info("MongoDB se successfully connect ho gaya!")
 except Exception as e:
@@ -53,7 +52,6 @@ async def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 # --- Conversation States (Step 2) ---
-# Ye states hain /addanime conversation ke liye
 (
     GET_ANIME_NAME,
     GET_ANIME_POSTER,
@@ -64,18 +62,33 @@ async def is_admin(user_id: int) -> bool:
 # --- Step 2: /addanime Conversation ---
 
 async def add_anime_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """/addanime command ka entry point"""
+    """/addanime command ka entry point (command or button se)"""
     user_id = update.effective_user.id
     if not await is_admin(user_id):
+        if update.callback_query:
+            await update.callback_query.answer("Aap admin nahi hain.", show_alert=True)
+            return ConversationHandler.END
         await update.message.reply_text("Aap admin nahi hain.")
         return ConversationHandler.END
-    
+
     logger.info(f"Admin {user_id} ne /addanime shuru kiya.")
-    await update.message.reply_text(
+    
+    text = (
         "Salaam Admin! Chalo naya anime add karte hain.\n\n"
         "Anime ka *Naam* kya hai? (Jaise: One Piece)\n\n"
         "Cancel karne ke liye /cancel type karein."
     )
+
+    if update.callback_query:
+        # Agar button se aaya hai
+        query = update.callback_query
+        await query.answer()
+        # Admin menu message ko edit karke naya text daalo
+        await query.edit_message_text(text, parse_mode='Markdown') 
+    else:
+        # Agar /addanime command se aaya hai
+        await update.message.reply_text(text, parse_mode='Markdown')
+
     return GET_ANIME_NAME
 
 async def get_anime_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,9 +106,8 @@ async def get_anime_poster(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Anime ka poster save karega (file_id)"""
     if not update.message.photo:
         await update.message.reply_text("Ye photo nahi hai. Please ek photo bhejo.")
-        return GET_ANIME_POSTER # Wapas poster maangega
+        return GET_ANIME_POSTER 
         
-    # Hum sabse high quality photo ki file_id store karenge
     poster_file_id = update.message.photo[-1].file_id
     context.user_data['anime_poster_id'] = poster_file_id
     logger.info(f"Anime ka poster file_id mila: {poster_file_id}")
@@ -111,16 +123,12 @@ async def get_anime_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Anime ka description save karega"""
     context.user_data['anime_desc'] = update.message.text
     logger.info("Anime ka description mil gaya.")
-    
-    # Ab user se confirm karwayenge
     return await confirm_anime_details(update, context)
 
 async def skip_anime_desc(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Description ko skip karega"""
-    context.user_data['anime_desc'] = None # Description ko None set kar do
+    context.user_data['anime_desc'] = None 
     logger.info("Anime ka description skip kiya.")
-    
-    # Ab user se confirm karwayenge
     return await confirm_anime_details(update, context)
 
 async def confirm_anime_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,7 +147,6 @@ async def confirm_anime_details(update: Update, context: ContextTypes.DEFAULT_TY
         [InlineKeyboardButton("❌ Cancel (Start Over)", callback_data="cancel_add_anime")]
     ]
     
-    # Poster ke saath details bhejega
     await update.message.reply_photo(
         photo=poster_id,
         caption=caption,
@@ -151,28 +158,25 @@ async def confirm_anime_details(update: Update, context: ContextTypes.DEFAULT_TY
 async def save_anime_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Callback query jab admin 'Save' button dabayega"""
     query = update.callback_query
-    await query.answer() # Button click ko register karo
+    await query.answer() 
     
     try:
         name = context.user_data['anime_name']
         poster_id = context.user_data['anime_poster_id']
         desc = context.user_data['anime_desc']
 
-        # Database document
         anime_document = {
             "name": name,
             "poster_id": poster_id,
             "description": desc,
-            "seasons": {} # Seasons hum agle step mein add karenge
+            "seasons": {} 
         }
         
-        # Check karo kahi ye anime pehle se to nahi hai
         existing_anime = animes_collection.find_one({"name": name})
         if existing_anime:
             await query.edit_message_caption(caption="⚠ *Error:* Ye anime naam '"+name+"' pehle se database mein hai.")
             return ConversationHandler.END
 
-        # Naya anime database me insert karo
         animes_collection.insert_one(anime_document)
         
         logger.info(f"Naya Anime DB mein save ho gaya: {name}")
@@ -180,9 +184,9 @@ async def save_anime_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
     except Exception as e:
         logger.error(f"Anime save karne me error: {e}")
-        await query.edit_message_caption(caption=f"❌ *Error!*\n\nDatabase me save nahi kar paya. Details ke liye logs check karein.")
+        await query.edit_message_caption(caption=f"❌ *Error!*\n\nDatabase me save nahi kar paya.")
         
-    context.user_data.clear() # Temporary data clear karo
+    context.user_data.clear() 
     return ConversationHandler.END
 
 async def cancel_add_anime(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -190,17 +194,14 @@ async def cancel_add_anime(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     await query.edit_message_caption(caption="❌ *Cancelled.* Naya anime add karne ka process rok diya gaya hai.")
-    
-    context.user_data.clear() # Temporary data clear karo
+    context.user_data.clear() 
     return ConversationHandler.END
 
 async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """/cancel command se conversation ko band karega"""
     logger.info("User ne conversation /cancel se band kar diya.")
-    await update.message.reply_text(
-        "Operation cancel kar diya gaya hai."
-    )
-    context.user_data.clear() # Temporary data clear karo
+    await update.message.reply_text("Operation cancel kar diya gaya hai.")
+    context.user_data.clear() 
     return ConversationHandler.END
 
 # --- Purane Handlers (Step 1) ---
@@ -226,29 +227,45 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Menu dekhne ke liye /menu type karein."
     )
 
+# --- Admin Panel (Buttons ke Saath) ---
+
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Admin panel ka main menu (abhi basic hai)"""
+    """Admin panel ka main menu (Buttons ke saath)"""
     user_id = update.effective_user.id
     if not await is_admin(user_id):
         await update.message.reply_text("Aap admin nahi hain.")
         return
 
     logger.info("Admin ne /admin command use kiya.")
-    admin_menu_text = """
-👑 *Salaam Admin! Control Panel* 👑
+    
+    keyboard = [
+        # Row 1: 2 buttons
+        [
+            InlineKeyboardButton("➕ Add Anime", callback_data="admin_add_anime"),
+            InlineKeyboardButton("➕ Add Season", callback_data="admin_add_season")
+        ],
+        # Row 2: 2 buttons
+        [
+            InlineKeyboardButton("➕ Add Episode", callback_data="admin_add_episode"),
+            InlineKeyboardButton("⚙ Bot Config", callback_data="admin_config")
+        ]
+    ]
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    admin_menu_text = "👑 *Salaam Admin! Control Panel* 👑\n\nContent add karne ya settings change karne ke liye buttons use karein."
+    
+    await update.message.reply_text(admin_menu_text, reply_markup=reply_markup, parse_mode='Markdown')
 
-Naya content add karne ke liye in commands ka istemaal karein:
+async def placeholder_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Jo buttons abhi ready nahi hain, unke liye"""
+    query = update.callback_query
+    await query.answer("Ye feature jald aa raha hai...", show_alert=True)
 
-/addanime - Naya Anime/Movie add karo.
-/addseason - (Jald aa raha hai...)
-/addepisode - (Jald aa raha hai...)
-
-Configuration ke liye:
-/config - (Jald aa raha hai...)
-
-Cancel karne ke liye /cancel type karein.
-    """
-    await update.message.reply_text(admin_menu_text, parse_mode='Markdown')
+# --- Error Handler ---
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Log errors caused by Updates."""
+    logger.error(f"Error: {context.error} \nUpdate: {update}", exc_info=True)
 
 # --- Main Bot Function ---
 def main():
@@ -257,7 +274,10 @@ def main():
 
     # --- Naya: ConversationHandler for /addanime (Step 2) ---
     add_anime_conv = ConversationHandler(
-        entry_points=[CommandHandler("addanime", add_anime_start)],
+        entry_points=[
+            CommandHandler("addanime", add_anime_start),
+            CallbackQueryHandler(add_anime_start, pattern="^admin_add_anime$") # Button se start karne ke liye
+        ],
         states={
             GET_ANIME_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_anime_name)],
             GET_ANIME_POSTER: [MessageHandler(filters.PHOTO, get_anime_poster)],
@@ -271,7 +291,7 @@ def main():
             ]
         },
         fallbacks=[CommandHandler("cancel", conv_cancel)],
-        per_user=True, # Taki har admin ka data alag store ho
+        per_user=True, 
         per_chat=True
     )
     
@@ -279,7 +299,15 @@ def main():
 
     # --- Puraane Handlers (Step 1) ---
     application.add_handler(CommandHandler("start", start_command))
-    application.add_handler(CommandHandler("admin", admin_command))
+    application.add_handler(CommandHandler("admin", admin_command)) # Ye ab buttons wala hai
+    
+    # --- Naye Handlers (Placeholder buttons) ---
+    application.add_handler(CallbackQueryHandler(placeholder_button_handler, pattern="^admin_add_season$"))
+    application.add_handler(CallbackQueryHandler(placeholder_button_handler, pattern="^admin_add_episode$"))
+    application.add_handler(CallbackQueryHandler(placeholder_button_handler, pattern="^admin_config$"))
+
+    # Error handler (Pichle step se)
+    application.add_error_handler(error_handler)
 
     logger.info("Bot polling start kar raha hai...")
     application.run_polling()
