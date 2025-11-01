@@ -110,7 +110,8 @@ async def check_user_subscription(user_id: int):
 (DA_GET_ANIME, DA_CONFIRM) = range(23, 25)
 (DS_GET_ANIME, DS_GET_SEASON, DS_CONFIRM) = range(25, 28)
 (SUB_GET_SS,) = range(28, 29)
-(ADMIN_SUB_GET_DAYS,) = range(29, 30)
+# NAYE States
+(ADMIN_PENDING_MENU, ADMIN_SUB_GET_DAYS) = range(29, 31)
 
 # --- Common Conversation Fallbacks ---
 async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -124,10 +125,9 @@ async def conv_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 async def back_to_admin_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(FIXED) Kisi bhi sub-menu se wapas main admin menu pe aayega"""
     query = update.callback_query
     await query.answer()
-    await admin_command(update, context) # FIX: Ab ye seedha admin_command ko call karega
+    await admin_command(update, context)
     return ConversationHandler.END 
 
 async def back_to_add_content_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,7 +161,6 @@ async def back_to_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 # --- Conversation: Add Anime ---
-# (Poora Add Anime conversation code yahan hai, unchanged)
 async def add_anime_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -211,7 +210,6 @@ async def save_anime_details(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 # --- Conversation: Add Season ---
-# (Poora Add Season conversation code yahan hai, unchanged)
 async def add_season_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -257,7 +255,6 @@ async def save_season(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # --- Conversation: Add Episode ---
-# (Poora Add Episode conversation code yahan hai, unchanged)
 async def add_episode_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -386,7 +383,6 @@ async def set_donate_qr_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return ConversationHandler.END
 
 # --- Conversation: Set Links ---
-# (Poora Set Links conversation code yahan hai, unchanged)
 async def set_links_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -426,7 +422,6 @@ async def skip_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # --- Conversation: Post Generator ---
-# (Poora Post Generator conversation code yahan hai, unchanged)
 async def post_gen_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -551,7 +546,6 @@ async def post_gen_send_to_chat(update: Update, context: ContextTypes.DEFAULT_TY
     return ConversationHandler.END
 
 # --- Conversation: Delete Anime ---
-# (Poora Delete Anime conversation code yahan hai, unchanged)
 async def delete_anime_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -586,7 +580,6 @@ async def delete_anime_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 # --- Conversation: Delete Season ---
-# (Poora Delete Season conversation code yahan hai, unchanged)
 async def delete_season_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -636,18 +629,21 @@ async def delete_season_do(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- Conversation: User Subscription Flow ---
-# (Poora User Subscription Flow conversation code yahan hai, unchanged)
+# --- NAYA (Behtar) Conversation: User Subscription Flow ---
 async def user_subscribe_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 1: User 'Subscribe' button dabata hai"""
     query = update.callback_query
     await query.answer()
     user_id = query.effective_user.id
+    
     config = await get_config()
     qr_id = config.get('sub_qr_id')
     price = config.get('price')
+    
     if not qr_id or not price:
         await query.edit_message_text("❌ **Error!** Subscription system abhi setup nahi hua hai. Admin se baat karein.")
         return ConversationHandler.END
+        
     caption = (
         f"**Subscription Plan:**\n"
         f"Price: **{price}**\n\n"
@@ -660,109 +656,204 @@ async def user_subscribe_start(update: Update, context: ContextTypes.DEFAULT_TYP
     await query.message.reply_photo(photo=qr_id, caption=caption, parse_mode='Markdown')
     await query.message.delete() 
     return SUB_GET_SS
+
 async def user_sent_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(NAYA) Step 2: User screenshot bhejta hai & DB mein save hota hai"""
     if not update.message.photo:
         await update.message.reply_text("Ye photo nahi hai. Please ek screenshot **photo ki tarah** bhejo ya /cancel karo.")
         return SUB_GET_SS
+        
     user = update.effective_user
+    
+    # Check karo ki pehle se pending toh nahi hai
+    user_data = users_collection.find_one({"_id": user.id})
+    if user_data and user_data.get("pending_payment"):
+        await update.message.reply_text("Aapka ek payment pehle se hi verification ke liye pending hai. Lütfen intezaar karein.")
+        return ConversationHandler.END
+        
     screenshot_id = update.message.photo[-1].file_id
-    last_ss_time = context.user_data.get('last_ss_time')
-    if last_ss_time and (datetime.now() - last_ss_time) < timedelta(minutes=5):
-        await update.message.reply_text("Aapne haal hi mein ek screenshot bheja hai. Please 5 minute baad try karein.")
-        return SUB_GET_SS
-    context.user_data['last_ss_time'] = datetime.now()
+    
+    # Admin ko forward karne ki jagah DB mein save karo
     try:
-        admin_caption = (
-            f"🔔 **Naya Payment Verification** 🔔\n\n"
-            f"**User:** {user.first_name} (<code>{user.id}</code>)\n"
-            f"**Username:** @{user.username}"
+        pending_data = {
+            "ss_id": screenshot_id,
+            "time": datetime.now()
+        }
+        users_collection.update_one(
+            {"_id": user.id},
+            {"$set": {"pending_payment": pending_data}},
+            upsert=True
         )
-        keyboard = [
-            [InlineKeyboardButton(f"✅ Approve User {user.id}", callback_data=f"admin_approve_sub_{user.id}")],
-            [InlineKeyboardButton(f"❌ Reject User {user.id}", callback_data=f"admin_reject_sub_{user.id}")]
-        ]
-        await context.bot.send_photo(
-            chat_id=ADMIN_ID,
-            photo=screenshot_id,
-            caption=admin_caption,
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='HTML'
-        )
+        
         await update.message.reply_text(
             "✅ **Screenshot Mil Gaya!**\n\n"
-            "Aapka screenshot admin ko bhej diya gaya hai. "
-            "Verification mein kuch time lag sakta hai.\n\n"
-            "Approve hote hi aapko message aa jayega."
+            "Aapka screenshot verification ke liye save kar liya gaya hai. "
+            "Admin ke approve karte hi aapka account activate ho jayega."
         )
+        
+        # (Optional) Admin ko sirf ek notification bhejo
+        try:
+            admin_pending_count = users_collection.count_documents({"pending_payment": {"$ne": None}})
+            await context.bot.send_message(ADMIN_ID, f"🔔 **Naya Payment** 🔔\n\nEk naya payment verification ke liye aaya hai. Aapke paas ab total **{admin_pending_count}** pending hain.\n\n/admin dabake check karein.")
+        except Exception as e:
+            logger.warning(f"Admin ko 'naya payment' notification nahi bhej paya: {e}")
+            
         return ConversationHandler.END
+        
     except Exception as e:
-        logger.error(f"Admin ko SS forward karne me error: {e}")
-        await update.message.reply_text("❌ **Error!** Admin tak aapka screenshot nahi pahuncha. Please /support se contact karein.")
+        logger.error(f"Screenshot DB mein save karne me error: {e}")
+        await update.message.reply_text("❌ **Error!** Aapka screenshot save nahi ho paya. Please /support se contact karein.")
         return ConversationHandler.END
 
-# --- Conversation: Admin Subscription Approval ---
-# (Poora Admin Subscription Approval conversation code yahan hai, unchanged)
+# --- NAYA (Behtar) Conversation: Admin Subscription Approval ---
 async def admin_approval_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 3: Admin Approve/Reject dabata hai (Yeh abhi bhi Sahi hai)"""
     query = update.callback_query
     await query.answer()
+    
     action, user_id_str = query.data.split('_')[1], query.data.split('_')[-1]
     user_id = int(user_id_str)
+    
     if action == "reject":
         try:
             await context.bot.send_message(user_id, "❌ **Payment Rejected** ❌\n\nAapka payment verification fail ho gaya hai. Agar koi galti hui hai, toh please /support se contact karein.")
             await query.edit_message_caption(caption=f"❌ User {user_id} ko reject kar diya gaya hai.", reply_markup=None)
+            # DB se pending status hatao
+            users_collection.update_one({"_id": user_id}, {"$set": {"pending_payment": None}})
         except Exception as e:
             logger.error(f"User {user_id} ko reject message bhejme me error: {e}")
             await query.edit_message_caption(caption=f"❌ User {user_id} ko reject kar diya gaya hai (par use message nahi bhej paya).", reply_markup=None)
         return ConversationHandler.END
+        
     elif action == "approve":
+        # Admin se pucho kitne din ka subscription dena hai
         context.user_data['user_to_approve'] = user_id
         await query.edit_message_caption(
             caption=f"✅ User {user_id} ko approve kar rahe hain.\n\nAb batao, kitne din ka subscription dena hai? (Sirf number bhejo, jaise: 30)",
             reply_markup=None
         )
         return ADMIN_SUB_GET_DAYS
+
 async def admin_set_sub_days(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Step 4: Admin din set karta hai"""
     try:
         days = int(update.message.text)
     except ValueError:
         await update.message.reply_text("Galat input. Sirf number bhejo (jaise 30).")
         return ADMIN_SUB_GET_DAYS
+        
     user_id = context.user_data.get('user_to_approve')
     if not user_id:
         await update.message.reply_text("Error! User ID nahi mili. /cancel karke firse try karo.")
         return ConversationHandler.END
+        
     expiry_date = datetime.now() + timedelta(days=days)
+    
+    # User ko DB mein update karo (aur pending status hatao)
     users_collection.update_one(
         {"_id": user_id},
         {"$set": {
             "subscribed": True,
             "expiry_date": expiry_date,
-            "last_screenshot_time": None 
+            "pending_payment": None # Pending status clear karo
         }},
         upsert=True
     )
+    
     logger.info(f"Admin ne user {user_id} ko {days} din ka sub diya.")
+    
+    # Admin ko confirmation do
     await update.message.reply_text(f"✅ **Success!**\nUser {user_id} ko {days} din ka subscription mil gaya hai. (Expire on: {expiry_date.strftime('%Y-%m-%d')})")
+    
+    # User ko confirmation do
     try:
         await context.bot.send_message(user_id, f"🎉 **Subscription Activated!** 🎉\n\nAapka account {days} din ke liye activate ho gaya hai. Happy watching!\n\n/menu dabake check kar sakte hain.")
     except Exception as e:
         logger.error(f"User {user_id} ko activation message bhejme me error: {e}")
+        
     context.user_data.clear()
     return ConversationHandler.END
 
-# --- (FIXED) Admin Panel: Sub-Menu Functions ---
+# --- NAYA Conversation: Pending Payments Menu (Admin) ---
+async def show_pending_payments(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(NAYA) 'Pending Payments' button dabane par entry point"""
+    query = update.callback_query
+    await query.answer()
+    
+    pending_users = list(users_collection.find({"pending_payment": {"$ne": None}}))
+    
+    keyboard = []
+    if not pending_users:
+        text = "🔔 **Pending Payments** 🔔\n\nKoi pending payments nahi hain."
+    else:
+        text = "🔔 **Pending Payments** 🔔\n\nAap in users ne verification ke liye screenshot bheja hai. Details dekhne ke liye click karein:"
+        for user in pending_users:
+            username = user.get('username')
+            display_name = f"@{username}" if username else user.get('first_name', user['_id'])
+            keyboard.append([InlineKeyboardButton(f"{display_name}", callback_data=f"pending_user_{user['_id']}")])
+            
+    keyboard.append([InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")])
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    return ADMIN_PENDING_MENU
 
+async def show_pending_user_details(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """(NAYA) Admin jab list se user select karta hai"""
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = int(query.data.split('_')[-1])
+    user_data = users_collection.find_one({"_id": user_id})
+    
+    if not user_data or not user_data.get("pending_payment"):
+        await query.answer("❌ Error! Ye user ab pending nahi hai. List refresh ho rahi hai...", show_alert=True)
+        # List ko refresh kardo
+        return await show_pending_payments(update, context)
+
+    try:
+        ss_id = user_data["pending_payment"]["ss_id"]
+        # User ki details firse fetch karlo, shayad username change ho gaya ho
+        user = await context.bot.get_chat(user_id)
+        
+        admin_caption = (
+            f"🔔 **Verification** 🔔\n\n"
+            f"**User:** {user.first_name} (<code>{user.id}</code>)\n"
+            f"**Username:** @{user.username}"
+        )
+        keyboard = [
+            [InlineKeyboardButton(f"✅ Approve {user.id}", callback_data=f"admin_approve_sub_{user.id}")],
+            [InlineKeyboardButton(f"❌ Reject {user.id}", callback_data=f"admin_reject_sub_{user.id}")]
+        ]
+        
+        # Admin ko screenshot bhejo approve/reject ke liye
+        await context.bot.send_photo(
+            chat_id=ADMIN_ID,
+            photo=ss_id,
+            caption=admin_caption,
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode='HTML'
+        )
+        
+        # Purana message edit karke batao ki SS bhej diya hai
+        await query.edit_message_text(
+            f"User @{user.username} ka screenshot aapko bhej diya gaya hai approve/reject karne ke liye.\n\nWaapas list par jaane ke liye 'Back' dabayein.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to List", callback_data="admin_pending_payments")]])
+        )
+        
+    except Exception as e:
+        logger.error(f"Pending user ka SS bhejme me error: {e}")
+        await query.answer("❌ Error! Screenshot bhej nahi paya.", show_alert=True)
+        
+    return ADMIN_PENDING_MENU # Menu par hi raho
+
+# --- Admin Panel: Sub-Menu Functions ---
 async def add_content_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """'Add Content' ka sub-menu dikhayega"""
     keyboard = [
-        [InlineKeyboardButton("➕ Add Anime", callback_data="admin_add_anime")],
+        [InlineKeyboardButton("➕ Add Content", callback_data="admin_add_anime")],
         [InlineKeyboardButton("➕ Add Season", callback_data="admin_add_season")],
         [InlineKeyboardButton("➕ Add Episode", callback_data="admin_add_episode")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
     text = "➕ **Add Content** ➕\n\nAap kya add karna chahte hain?"
-    
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -770,14 +861,12 @@ async def add_content_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         
 async def manage_content_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """'Manage Content' ka sub-menu dikhayega"""
     keyboard = [
         [InlineKeyboardButton("🗑️ Delete Anime", callback_data="admin_del_anime")],
         [InlineKeyboardButton("🗑️ Delete Season", callback_data="admin_del_season")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
     text = "✏️ **Manage Content** ✏️\n\nAap kya manage karna chahte hain?"
-    
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
@@ -785,7 +874,6 @@ async def manage_content_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
         
 async def sub_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(FIXED) 'Subscription Settings' ka sub-menu dikhayega"""
     config = await get_config()
     sub_qr_status = "✅" if config.get('sub_qr_id') else "❌"
     price_status = "✅" if config.get('price') else "❌"
@@ -795,16 +883,13 @@ async def sub_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
     text = "💲 **Subscription Settings** 💲\n\nSubscription se judi settings yahan badlein."
-    
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     elif update.message:
-        # Jab QR save karne ke baad call hota hai
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def donate_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(FIXED) 'Donation Settings' ka sub-menu dikhayega"""
     config = await get_config()
     donate_qr_status = "✅" if config.get('donate_qr_id') else "❌"
     donate_link_status = "✅" if config.get('links', {}).get('donate') else "❌"
@@ -814,16 +899,13 @@ async def donate_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
     text = "❤️ **Donation Settings** ❤️\n\nDonation se judi settings yahan badlein."
-
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     elif update.message:
-        # Jab QR save karne ke baad call hota hai
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def other_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(FIXED) 'Other Links' ka sub-menu dikhayega"""
     config = await get_config()
     backup_status = "✅" if config.get('links', {}).get('backup') else "❌"
     support_status = "✅" if config.get('links', {}).get('support') else "❌"
@@ -833,16 +915,13 @@ async def other_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
     text = "🔗 **Other Links** 🔗\n\nDoosre links yahan set karein."
-
     if update.callback_query:
         await update.callback_query.answer()
         await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     elif update.message:
-        # Jab link save karne ke baad call hota hai
         await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
     
 # --- User Handlers ---
-
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id, first_name = user.id, user.first_name
@@ -850,7 +929,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     user_data = users_collection.find_one({"_id": user_id})
     if not user_data:
-        users_collection.insert_one({"_id": user_id, "first_name": first_name, "username": user.username, "subscribed": False, "expiry_date": None})
+        users_collection.insert_one({"_id": user_id, "first_name": first_name, "username": user.username, "subscribed": False, "expiry_date": None, "pending_payment": None})
         logger.info(f"Naya user database me add kiya: {user_id}")
     
     if await is_admin(user_id):
@@ -867,7 +946,6 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     config = await get_config()
     links = config.get('links', {})
-    
     sub_status = await check_user_subscription(user_id)
     
     if sub_status["active"]:
@@ -887,17 +965,14 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     btn_backup = InlineKeyboardButton("Backup", url=backup_url)
     btn_donate = InlineKeyboardButton("Donate", url=donate_url)
     btn_support = InlineKeyboardButton("Support", url=support_url)
-    
     btn_sub = InlineKeyboardButton(sub_text, callback_data=sub_cb)
     keyboard = [[btn_sub], [btn_backup, btn_donate], [btn_support]]
     
-    # (FIXED) Menu command hamesha naya message bhejega
     if update.message:
         await update.message.reply_text(f"Salaam {user.first_name}! Ye raha aapka menu:", reply_markup=InlineKeyboardMarkup(keyboard))
     elif update.callback_query:
         await update.callback_query.message.reply_text(f"Salaam {user.first_name}! Ye raha aapka menu:", reply_markup=InlineKeyboardMarkup(keyboard))
-        await update.callback_query.message.delete() # Purana wala delete kar do
-
+        await update.callback_query.message.delete()
 
 async def user_check_sub_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -909,11 +984,9 @@ async def user_check_sub_status(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await query.answer("Aap subscribed nahi hain.", show_alert=True)
         await query.message.delete()
-        await menu_command(update, context) # FIX: update (jisme query hai) pass karo
-
+        await menu_command(update, context)
 
 # --- Download Handler (Poora Flow) ---
-# (Poora Download Handler conversation code yahan hai, unchanged)
 async def download_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     user = query.effective_user
@@ -1018,11 +1091,8 @@ async def send_file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error(f"File send karne me error: {e}")
         await context.bot.send_message(user.id, "❌ Error! File send nahi kar paya. Shayad file server par delete ho gayi hai.")
 
-
-# --- (FIXED) Admin Panel (Naya Layout) ---
-
+# --- Admin Panel (Naya Layout) ---
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """(FIXED) Admin panel ka main menu"""
     user_id = update.effective_user.id
     if not await is_admin(user_id):
         if update.message: await update.message.reply_text("Aap admin nahi hain.")
@@ -1031,7 +1101,8 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
     logger.info("Admin ne admin panel access kiya.")
     
-    pending_count = users_collection.count_documents({"subscribed": False, "last_screenshot_time": {"$ne": None}})
+    # NAYA: Pending payments count query
+    pending_count = users_collection.count_documents({"pending_payment": {"$ne": None}})
     
     keyboard = [
         [InlineKeyboardButton("➕ Add Content", callback_data="admin_menu_add_content")],
@@ -1040,26 +1111,21 @@ async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("💲 Subscription Settings", callback_data="admin_menu_sub_settings")],
         [InlineKeyboardButton("❤️ Donation Settings", callback_data="admin_menu_donate_settings")],
         [InlineKeyboardButton("🔗 Other Links", callback_data="admin_menu_other_links")],
-        [InlineKeyboardButton(f"🔔 Pending Payments ({pending_count})", callback_data="admin_pending_payments")]
+        [InlineKeyboardButton(f"🔔 Pending Payments ({pending_count})", callback_data="admin_pending_payments")] # NAYA: Ab yeh kaam karega
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     admin_menu_text = f"Salaam, Admin Boss! 👑\nAapka control panel taiyyar hai."
     
-    # --- YEH HAI ASLI FIX ---
     if update.callback_query:
-        # Button click se aaya hai (jaise "Back to Admin Menu")
         query = update.callback_query
         await query.answer()
         try:
             await query.edit_message_text(admin_menu_text, reply_markup=reply_markup, parse_mode='Markdown')
         except Exception as e:
             logger.warning(f"Admin menu edit nahi kar paya (shayad message same tha): {e}")
-            await query.answer() # Firse answer kar do agar edit fail hua
+            await query.answer()
     elif update.message:
-        # /admin ya /start se aaya hai
         await update.message.reply_text(admin_menu_text, reply_markup=reply_markup, parse_mode='Markdown')
-    # --- FIX END ---
-
 
 async def placeholder_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -1101,18 +1167,28 @@ def main():
     del_anime_conv = ConversationHandler(entry_points=[CallbackQueryHandler(delete_anime_start, pattern="^admin_del_anime$")], states={DA_GET_ANIME: [CallbackQueryHandler(delete_anime_confirm, pattern="^del_anime_")], DA_CONFIRM: [CallbackQueryHandler(delete_anime_do, pattern="^del_anime_confirm_yes$")]}, fallbacks=cancel_fallback + manage_fallback)
     del_season_conv = ConversationHandler(entry_points=[CallbackQueryHandler(delete_season_start, pattern="^admin_del_season$")], states={DS_GET_ANIME: [CallbackQueryHandler(delete_season_select, pattern="^del_season_anime_")], DS_GET_SEASON: [CallbackQueryHandler(delete_season_confirm, pattern="^del_season_")], DS_CONFIRM: [CallbackQueryHandler(delete_season_do, pattern="^del_season_confirm_yes$")]}, fallbacks=cancel_fallback + manage_fallback)
 
-    # User ka subscription flow
+    # --- NAYE Conversations ---
+    # 1. User jab 'Subscribe' dabata hai
     user_sub_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(user_subscribe_start, pattern="^user_subscribe$")],
         states={ SUB_GET_SS: [MessageHandler(filters.PHOTO, user_sent_screenshot)] },
         fallbacks=[CommandHandler("cancel", conv_cancel)]
     )
-    # Admin ka approval flow
+    # 2. Admin jab 'Approve' dabata hai
     admin_sub_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(admin_approval_handler, pattern="^admin_(approve|reject)_sub_")],
         states={ ADMIN_SUB_GET_DAYS: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_set_sub_days)] },
         fallbacks=[CommandHandler("cancel", conv_cancel)]
     )
+    # 3. (NAYA) Admin jab 'Pending Payments' dabata hai
+    pending_payments_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(show_pending_payments, pattern="^admin_pending_payments$")],
+        states={
+            ADMIN_PENDING_MENU: [CallbackQueryHandler(show_pending_user_details, pattern="^pending_user_")]
+        },
+        fallbacks=[CallbackQueryHandler(back_to_admin_menu, pattern="^admin_menu$"), CommandHandler("cancel", conv_cancel)]
+    )
+
 
     # --- Handlers ko Add Karo ---
     application.add_handler(CommandHandler("start", start_command))
@@ -1140,14 +1216,12 @@ def main():
     application.add_handler(del_season_conv)
     application.add_handler(user_sub_conv) 
     application.add_handler(admin_sub_conv)
+    application.add_handler(pending_payments_conv) # NAYA
     
     # Single Callbacks
     application.add_handler(CallbackQueryHandler(user_check_sub_status, pattern="^user_check_sub$"))
     application.add_handler(CallbackQueryHandler(download_handler, pattern="^dl_")) 
     application.add_handler(CallbackQueryHandler(send_file_handler, pattern="^sendfile_")) 
-    
-    # Placeholders
-    application.add_handler(CallbackQueryHandler(placeholder_button_handler, pattern="^admin_pending_payments$"))
 
     application.add_error_handler(error_handler)
 
