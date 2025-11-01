@@ -373,41 +373,59 @@ async def set_donate_qr_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def set_links_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text("Aapke **Backup Channel** ka link bhejo.\n(Example: https://t.me/mychannel)\n\n/skip - Skip.\n/cancel - Cancel.", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="back_to_links")]]))
-    return CL_GET_BACKUP
-async def get_backup_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['backup_link'] = update.message.text
-    await update.message.reply_text("Backup link save ho gaya.\n\nAb **Donate Link** bhejo.\n(Example: https://...)\n\n/skip - Skip.\n/cancel - Cancel.")
-    return CL_GET_DONATE
-async def skip_backup_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['backup_link'] = None
-    await update.message.reply_text("Backup link skip kiya.\n\nAb **Donate Link** bhejo.\n(Example: https://...)\n\n/skip - Skip.\n/cancel - Cancel.")
-    return CL_GET_DONATE
-async def get_donate_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['donate_link'] = update.message.text
-    await update.message.reply_text("Donate link save ho gaya.\n\nAb **Support Inbox/Group** ka link bhejo.\n(Example: https://t.me/mygroup)\n\n/skip - Skip.\n/cancel - Cancel.")
-    return CL_GET_SUPPORT
-async def skip_donate_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['donate_link'] = None
-    await update.message.reply_text("Donate link skip kiya.\n\nAb **Support Inbox/Group** ka link bhejo.\n(Example: https://t.me/mygroup)\n\n/skip - Skip.\n/cancel - Cancel.")
-    return CL_GET_SUPPORT
-async def get_support_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['support_link'] = update.message.text
-    await save_links(update, context)
-async def skip_support_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data['support_link'] = None
-    await save_links(update, context)
-async def save_links(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    links = {
-        "backup": context.user_data.get('backup_link'),
-        "donate": context.user_data.get('donate_link'),
-        "support": context.user_data.get('support_link')
-    }
-    config_collection.update_one({"_id": "bot_config"}, {"$set": {"links": links}}, upsert=True)
-    logger.info(f"Links update ho gaye: {links}")
-    await update.message.reply_text("✅ **Success!** Saare links set ho gaye hain.")
+    
+    # Pata lagao kaunsa link set karna hai
+    link_type = query.data.replace("admin_set_", "") # donate_link, backup_link, support_link
+    
+    if link_type == "donate_link":
+        context.user_data['link_type'] = "donate"
+        text = "Aapna **Donate Link** bhejo.\n(Example: https://...)\n\n/skip - Skip.\n/cancel - Cancel."
+        back_button = "back_to_donate_settings"
+    elif link_type == "backup_link":
+        context.user_data['link_type'] = "backup"
+        text = "Aapke **Backup Channel** ka link bhejo.\n(Example: https://t.me/mychannel)\n\n/skip - Skip.\n/cancel - Cancel."
+        back_button = "back_to_links"
+    else: # support_link
+        context.user_data['link_type'] = "support"
+        text = "Aapke **Support Inbox/Group** ka link bhejo.\n(Example: https://t.me/mygroup)\n\n/skip - Skip.\n/cancel - Cancel."
+        back_button = "back_to_links"
+        
+    await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=back_button)]]))
+    return CL_GET_BACKUP # Ek hi state use karenge sabke liye
+
+async def get_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Link ko save karega"""
+    link_url = update.message.text
+    link_type = context.user_data['link_type']
+    
+    config_collection.update_one({"_id": "bot_config"}, {"$set": {f"links.{link_type}": link_url}}, upsert=True)
+    logger.info(f"{link_type} link update ho gaya: {link_url}")
+    await update.message.reply_text(f"✅ **Success!** Naya {link_type} link set ho gaya hai.")
+    
+    # Wapas sahi menu pe bhejo
+    if link_type == "donate":
+        await donate_settings_menu(update, context)
+    else:
+        await other_links_menu(update, context)
+        
     context.user_data.clear()
-    await other_links_menu(update, context) # Wapas menu dikhao
+    return ConversationHandler.END
+    
+async def skip_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Link ko skip karega (None set karega)"""
+    link_type = context.user_data['link_type']
+    
+    config_collection.update_one({"_id": "bot_config"}, {"$set": {f"links.{link_type}": None}}, upsert=True)
+    logger.info(f"{link_type} link skip kiya (None set).")
+    await update.message.reply_text(f"✅ **Success!** {link_type} link remove kar diya gaya hai.")
+
+    # Wapas sahi menu pe bhejo
+    if link_type == "donate":
+        await donate_settings_menu(update, context)
+    else:
+        await other_links_menu(update, context)
+        
+    context.user_data.clear()
     return ConversationHandler.END
 
 # --- Conversation: Post Generator ---
@@ -488,18 +506,37 @@ async def generate_post_ask_chat(update: Update, context: ContextTypes.DEFAULT_T
             if anime_doc.get('description'): caption += f"**📖 Synopsis:**\n{anime_doc['description']}\n\n"
             caption += "Neeche [Download] button dabake download karein!"
             poster_id = anime_doc['poster_id']
+        
         links = config.get('links', {})
         dl_callback_data = f"dl_{anime_name}"
         if season_name: dl_callback_data += f"_{season_name}"
         if ep_num: dl_callback_data += f"_{ep_num}"
-        btn_backup = InlineKeyboardButton("Backup", url=links.get('backup', "https://t.me/"))
-        btn_donate = InlineKeyboardButton("Donate", url=links.get('donate', "https://t.me/"))
-        btn_support = InlineKeyboardButton("Support", url=links.get('support', "https://t.me/"))
+        
+        # --- NAYA URL FIX ---
+        backup_url = links.get('backup')
+        if not backup_url or not backup_url.startswith(("http", "t.me")):
+            backup_url = "https://t.me/" # Default placeholder
+        
+        donate_url = links.get('donate')
+        if not donate_url or not donate_url.startswith(("http", "t.me")):
+            donate_url = "https://t.me/" # Default placeholder
+
+        support_url = links.get('support')
+        if not support_url or not support_url.startswith(("http", "t.me")):
+            support_url = "https://t.me/" # Default placeholder
+            
+        btn_backup = InlineKeyboardButton("Backup", url=backup_url)
+        btn_donate = InlineKeyboardButton("Donate", url=donate_url)
+        btn_support = InlineKeyboardButton("Support", url=support_url)
+        # --- END FIX ---
+        
         btn_download = InlineKeyboardButton("Download", callback_data=dl_callback_data)
         keyboard = [[btn_backup, btn_donate], [btn_support, btn_download]]
+        
         context.user_data['post_caption'] = caption
         context.user_data['post_poster_id'] = poster_id
         context.user_data['post_keyboard'] = InlineKeyboardMarkup(keyboard)
+        
         await query.edit_message_text(
             "✅ **Post Ready!**\n\nAb uss **Channel ka @username** ya **Group/Channel ki Chat ID** bhejo jahaan ye post karna hai.\n"
             "(Example: @MyAnimeChannel ya -100123456789)\n\n/cancel - Cancel."
@@ -639,7 +676,7 @@ async def manage_content_menu(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def sub_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """'Subscription Settings' ka sub-menu dikhayega"""
     query = update.callback_query
-    await query.answer()
+    if query: await query.answer()
     config = await get_config()
     sub_qr_status = "✅" if config.get('sub_qr_id') else "❌"
     price_status = "✅" if config.get('price') else "❌"
@@ -648,12 +685,15 @@ async def sub_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"Set Price {price_status}", callback_data="admin_set_price")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
-    await query.edit_message_text("💲 **Subscription Settings** 💲\n\nSubscription se judi settings yahan badlein.", reply_markup=InlineKeyboardMarkup(keyboard))
+    text = "💲 **Subscription Settings** 💲\n\nSubscription se judi settings yahan badlein."
+    if query: await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else: await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 async def donate_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """'Donation Settings' ka sub-menu dikhayega"""
     query = update.callback_query
-    await query.answer()
+    if query: await query.answer()
     config = await get_config()
     donate_qr_status = "✅" if config.get('donate_qr_id') else "❌"
     donate_link_status = "✅" if config.get('links', {}).get('donate') else "❌"
@@ -662,12 +702,14 @@ async def donate_settings_menu(update: Update, context: ContextTypes.DEFAULT_TYP
         [InlineKeyboardButton(f"Set Donate Link {donate_link_status}", callback_data="admin_set_donate_link")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
-    await query.edit_message_text("❤️ **Donation Settings** ❤️\n\nDonation se judi settings yahan badlein.", reply_markup=InlineKeyboardMarkup(keyboard))
+    text = "❤️ **Donation Settings** ❤️\n\nDonation se judi settings yahan badlein."
+    if query: await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else: await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def other_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """'Other Links' ka sub-menu dikhayega"""
     query = update.callback_query
-    await query.answer()
+    if query: await query.answer()
     config = await get_config()
     backup_status = "✅" if config.get('links', {}).get('backup') else "❌"
     support_status = "✅" if config.get('links', {}).get('support') else "❌"
@@ -676,7 +718,10 @@ async def other_links_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton(f"Set Support Link {support_status}", callback_data="admin_set_support_link")],
         [InlineKeyboardButton("⬅️ Back to Admin Menu", callback_data="admin_menu")]
     ]
-    await query.edit_message_text("🔗 **Other Links** 🔗\n\nDoosre links yahan set karein.", reply_markup=InlineKeyboardMarkup(keyboard))
+    text = "🔗 **Other Links** 🔗\n\nDoosre links yahan set karein."
+    if query: await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    else: await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+    
 # --- User Handlers ---
 
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -719,11 +764,25 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_text = "💰 Subscribe Now"
         sub_cb = "user_subscribe" # Step 4 me banega
     
-    btn_sub = InlineKeyboardButton(sub_text, callback_data=sub_cb)
-    btn_backup = InlineKeyboardButton("Backup", url=links.get('backup') or "https://t.me/")
-    btn_donate = InlineKeyboardButton("Donate", url=links.get('donate') or "https://t.me/")
-    btn_support = InlineKeyboardButton("Support", url=links.get('support') or "https://t.me/")
+    # --- NAYA URL FIX ---
+    backup_url = links.get('backup')
+    if not backup_url or not backup_url.startswith(("http", "t.me")):
+        backup_url = "https://t.me/" # Default placeholder
+    
+    donate_url = links.get('donate')
+    if not donate_url or not donate_url.startswith(("http", "t.me")):
+        donate_url = "https://t.me/" # Default placeholder
 
+    support_url = links.get('support')
+    if not support_url or not support_url.startswith(("http", "t.me")):
+        support_url = "https://t.me/" # Default placeholder
+        
+    btn_backup = InlineKeyboardButton("Backup", url=backup_url)
+    btn_donate = InlineKeyboardButton("Donate", url=donate_url)
+    btn_support = InlineKeyboardButton("Support", url=support_url)
+    # --- END FIX ---
+    
+    btn_sub = InlineKeyboardButton(sub_text, callback_data=sub_cb)
     keyboard = [[btn_sub], [btn_backup, btn_donate], [btn_support]]
     
     await update.message.reply_text(f"Salaam {user.first_name}! Ye raha aapka menu:", reply_markup=InlineKeyboardMarkup(keyboard))
@@ -806,7 +865,7 @@ def main():
     # 6. Set Donate QR
     set_donate_qr_conv = ConversationHandler(entry_points=[CallbackQueryHandler(set_donate_qr_start, pattern="^admin_set_donate_qr$")], states={CD_GET_QR: [MessageHandler(filters.PHOTO, set_donate_qr_save)]}, fallbacks=cancel_fallback + donate_settings_fallback)
     # 7. Set Links
-    set_links_conv = ConversationHandler(entry_points=[CallbackQueryHandler(set_links_start, pattern="^admin_set_donate_link$|^admin_set_backup_link$|^admin_set_support_link$")], states={CL_GET_BACKUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_backup_link), CommandHandler("skip", skip_backup_link)], CL_GET_DONATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_donate_link), CommandHandler("skip", skip_donate_link)], CL_GET_SUPPORT: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_support_link), CommandHandler("skip", skip_support_link)]}, fallbacks=cancel_fallback + links_fallback)
+    set_links_conv = ConversationHandler(entry_points=[CallbackQueryHandler(set_links_start, pattern="^admin_set_donate_link$|^admin_set_backup_link$|^admin_set_support_link$")], states={CL_GET_BACKUP: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_link), CommandHandler("skip", skip_link)]}, fallbacks=cancel_fallback + links_fallback + donate_settings_fallback)
     # 8. Post Generator
     post_gen_conv = ConversationHandler(entry_points=[CallbackQueryHandler(post_gen_menu, pattern="^admin_post_gen$")], states={PG_MENU: [CallbackQueryHandler(post_gen_select_anime, pattern="^post_gen_season$"), CallbackQueryHandler(post_gen_select_anime, pattern="^post_gen_episode$")], PG_GET_ANIME: [CallbackQueryHandler(post_gen_select_season, pattern="^post_anime_")], PG_GET_SEASON: [CallbackQueryHandler(post_gen_select_episode, pattern="^post_season_")], PG_GET_EPISODE: [CallbackQueryHandler(post_gen_final_episode, pattern="^post_ep_")], PG_GET_CHAT: [MessageHandler(filters.TEXT & ~filters.COMMAND, post_gen_send_to_chat)]}, fallbacks=cancel_fallback + admin_menu_fallback)
     # 9. Delete Anime
