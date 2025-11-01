@@ -94,7 +94,7 @@ async def get_config():
     MANAGE_MENU, 
     DELETE_ANIME_SELECT, DELETE_ANIME_CONFIRM,
     DELETE_SEASON_ANIME, DELETE_SEASON_SELECT, DELETE_SEASON_CONFIRM
-) = range(28) # Total states
+) = range(29) # Total states
 
 # --- Step 2: /addanime Conversation ---
 
