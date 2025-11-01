@@ -418,5 +418,5 @@ def main():
     logger.info("Bot polling start kar raha hai...")
     application.run_polling()
 
-if _name_ == "__main__":
+if __name__ == "__main__":
     main()
