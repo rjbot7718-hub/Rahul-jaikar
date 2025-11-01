@@ -253,7 +253,42 @@ async def get_episode_number(update: Update, context: ContextTypes.DEFAULT_TYPE)
             InlineKeyboardButton("720p", callback_data="ep_quality_720p")
         ],
         [
-            InlineKeyboardButton("1080p", callback_data="ep_
+            InlineKeyboardButton("1080p", callback_data="ep_quality_1080p"),
+            InlineKeyboardButton("4K", callback_data="ep_quality_4K")
+        ],
+        [InlineKeyboardButton("❌ Cancel", callback_data="cancel_conv")]
+    ]
+    
+    await update.message.reply_text(
+        f"Aapne *Episode {context.user_data['ep_num']}* select kiya hai.\n\n"
+        "Ab *Quality* select karein:",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='Markdown'
+    )
+    return GET_EPISODE_QUALITY
+
+async def get_episode_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Jab admin quality select karega"""
+    query = update.callback_query
+    await query.answer()
+    quality = query.data.replace("ep_quality_", "")
+    context.user_data['quality'] = quality
+    
+    anime_name = context.user_data['anime_name']
+    season_name = context.user_data['season_name']
+    ep_num = context.user_data['ep_num']
+    
+    await query.edit_message_text(
+        f"*Ready!*\n"
+        f"Anime: *{anime_name}*\n"
+        f"Season: *{season_name}*\n"
+        f"Episode: *{ep_num}*\n"
+        f"Quality: *{quality}*\n\n"
+        "Ab mujhe is episode ki *Video File* forward karo (upload mat karna, forward karna)."
+        "\n\n/cancel - Cancel.",
+        parse_mode='Markdown'
+    )
+    return GET_EPISODE_FILE
 async def get_episode_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Jab admin final video file bhejega"""
     file_id = None
