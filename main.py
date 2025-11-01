@@ -512,14 +512,14 @@ async def generate_post_ask_chat(update: Update, context: ContextTypes.DEFAULT_T
         if season_name: dl_callback_data += f"_{season_name}"
         if ep_num: dl_callback_data += f"_{ep_num}"
         
-        # --- NAYA URL FIX ---
+        # --- (FIXED) NAYA URL FIX ---
         backup_url = links.get('backup')
         if not backup_url or not backup_url.startswith(("http", "t.me")):
             backup_url = "https://t.me/" # Default placeholder
         
         donate_url = links.get('donate')
         if not donate_url or not donate_url.startswith(("http", "t.me")):
-            donate_url = "https://t.me/" # Default placeholder
+            donate_url = "https://t.me/" # Default placeholder (YEH FIX THA)
 
         support_url = links.get('support')
         if not support_url or not support_url.startswith(("http", "t.me")):
@@ -764,18 +764,18 @@ async def menu_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         sub_text = "💰 Subscribe Now"
         sub_cb = "user_subscribe" # Step 4 me banega
     
-    # --- NAYA URL FIX ---
+    # --- (FIXED) NAYA URL FIX ---
     backup_url = links.get('backup')
     if not backup_url or not backup_url.startswith(("http", "t.me")):
-        backup_url = "https://t.me/" # Default placeholder
+        backup_url = "https://t.me/" # Default placeholder (YEH FIX THA)
     
     donate_url = links.get('donate')
     if not donate_url or not donate_url.startswith(("http", "t.me")):
-        donate_url = "https://t.me/" # Default placeholder
+        donate_url = "https://t.me/" # Default placeholder (YEH FIX THA)
 
     support_url = links.get('support')
     if not support_url or not support_url.startswith(("http", "t.me")):
-        support_url = "https://t.me/" # Default placeholder
+        support_url = "https://t.me/" # Default placeholder (YEH FIX THA)
         
     btn_backup = InlineKeyboardButton("Backup", url=backup_url)
     btn_donate = InlineKeyboardButton("Donate", url=donate_url)
