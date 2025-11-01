@@ -1,4 +1,5 @@
 python-telegram-bot
 pymongo[srv]
+python-dotenv
 flask
 gunicorn
